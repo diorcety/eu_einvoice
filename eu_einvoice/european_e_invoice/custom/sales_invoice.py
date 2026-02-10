@@ -264,6 +264,7 @@ class EInvoiceGenerator:
 	def _set_seller(self):
 		self.doc.trade.agreement.seller.name = self.invoice.company
 		self._set_seller_tax_id()
+		self._set_seller_siren()
 
 		if self.profile > EInvoiceProfile.BASIC:
 			self._set_seller_contact()
@@ -294,6 +295,13 @@ class EInvoiceGenerator:
 				id=(seller_vat_scheme, seller_tax_id),
 			)
 		)
+
+	def _set_seller_siren(self):
+		try:
+			siren = frappe.db.get_value("Company", self.invoice.company, "siren_number")
+			self.doc.trade.agreement.seller.legal_organization.id=("0002", siren)
+		except Exception:
+			pass  # ignore
 
 	def _set_seller_address(self):
 		if not self.seller_address:
@@ -354,6 +362,7 @@ class EInvoiceGenerator:
 
 		self._set_buyer_electronic_address()
 		self._set_buyer_tax_id()
+		self._set_buyer_siren()
 
 	def _set_buyer_electronic_address(self):
 		if self.customer.electronic_address_scheme and self.customer.electronic_address:
@@ -388,6 +397,13 @@ class EInvoiceGenerator:
 				id=(customer_vat_scheme, customer_tax_id),
 			)
 		)
+
+	def _set_buyer_siren(self):
+		try:
+			siren = frappe.db.get_value("Customer", self.customer, "siren_number")
+			self.doc.trade.agreement.buyer.legal_organization.id=("0002", siren)
+		except Exception:
+			pass  # ignore
 
 	def _set_buyer_address(self):
 		if not self.buyer_address:
