@@ -246,7 +246,10 @@ class EInvoiceGenerator:
 			# -- Commercial invoice --
 			# Document/message claiming payment for goods or services supplied under
 			# conditions agreed between seller and buyer.
-			self.doc.header.type_code = "380"
+			if self.invoice.is_down_payment_invoice:
+				self.doc.header.type_code = "386"
+			else:
+				self.doc.header.type_code = "380"
 
 		self.doc.header.issue_date_time = getdate(self.invoice.posting_date)
 
