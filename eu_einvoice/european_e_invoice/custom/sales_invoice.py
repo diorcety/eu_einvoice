@@ -204,9 +204,43 @@ class EInvoiceGenerator:
 		ref_doc.type_code = "916"  # "Related document" according to UNTDID 1001
 		self.doc.trade.agreement.additional_references.add(ref_doc)
 
+	def _get_br_fr_billing_mode(self):
+		"""Determines the billing mode prefix and step for BR-FR invoice formatting."""
+		have_service = False
+		have_goods = False
+		for item in self.invoice.items:
+			if item.item_group == "Services":
+				have_service = True
+			else:
+				have_goods = True
+		if have_goods:
+			if have_service:
+				prefix = "M"
+			else:
+				prefix = "B"
+		else:
+			if have_service:
+				prefix = "S"
+			else:
+				raise ValueError("Should have at least one service or one good item")
+
+		step = 1
+		if self.invoice.outstanding_amount == 0:
+			step = 2
+			if self.invoice.is_down_payment_invoice:
+				step = 4
+		return f"{prefix}{step}"
+
+	def _get_business(self):
+		"""Determines the business identifier for the invoice based on settings"""
+		settings: EInvoiceSettings = frappe.get_single("E Invoice Settings")
+		if settings.french_afnor_fr:
+			return self._get_br_fr_billing_mode()
+		return "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0"
+
 	def _set_context(self):
-		"""Set default context according to XRechnung 3.0.2"""
-		self.doc.context.business_parameter.id = "urn:fdc:peppol.eu:2017:poacc:billing:01:1.0"
+		"""Set the business and guideline parameters in the document context."""
+		self.doc.context.business_parameter.id = self._get_business()
 		self.doc.context.guideline_parameter.id = get_guideline(self.profile)
 
 	def _set_header(self):

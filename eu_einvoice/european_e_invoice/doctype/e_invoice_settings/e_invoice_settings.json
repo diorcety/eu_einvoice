@@ -8,6 +8,7 @@
   "sales_invoice_section",
   "validate_sales_invoice_on_save",
   "validate_sales_invoice_on_submit",
+  "french_afnor_fr",
   "column_break_rnbc",
   "error_action_on_save",
   "error_action_on_submit",
@@ -28,6 +29,12 @@
    "fieldname": "validate_sales_invoice_on_submit",
    "fieldtype": "Check",
    "label": "Validate Sales Invoice on Submit"
+  },
+  {
+   "default": "0",
+   "fieldname": "french_afnor_fr",
+   "fieldtype": "Check",
+   "label": "French AFNOR FE (XP Z12-012)"
   },
   {
    "fieldname": "sales_invoice_section",
