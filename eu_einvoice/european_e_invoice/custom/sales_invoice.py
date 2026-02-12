@@ -39,6 +39,7 @@ uom_codes = CommonCodeRetriever(
 payment_means_codes = CommonCodeRetriever(["urn:xoev-de:xrechnung:codeliste:untdid.4461_3"], "ZZZ")
 duty_tax_fee_category_codes = CommonCodeRetriever(["urn:xoev-de:kosit:codeliste:untdid.5305_3"], "S")
 vat_exemption_reason_codes = CommonCodeRetriever(["urn:xoev-de:kosit:codeliste:vatex_1"], "vatex-eu-ae")
+subject_codes = CommonCodeRetriever(["urn:xoev-de:kosit:codeliste:untdid.4451_4"], "AAI")
 
 
 @frappe.whitelist()
@@ -296,6 +297,18 @@ class EInvoiceGenerator:
 			note = IncludedNote(subject_code="AAR")  # Terms of delivery
 			note.content.add(f"{self.invoice.incoterm} {self.invoice.named_place or ''}".strip())
 			self.doc.header.notes.add(note)
+
+		if hasattr(self.invoice, "terms_and_conditions_items"):
+			for term in self.invoice.terms_and_conditions_items:
+				if not term.hide_from_print:
+					# Contained in invoice's terms ("ABC")
+					continue
+
+				subject_code = subject_codes.get([("Terms and Conditions", term.tc_name)])
+				terms = frappe.db.get_value("Terms and Conditions", term.tc_name, "terms")
+				note = IncludedNote(subject_code=subject_code)
+				note.content.add(to_markdown(terms).strip())
+				self.doc.header.notes.add(note)
 
 	def _set_seller(self):
 		self.doc.trade.agreement.seller.name = self.invoice.company
