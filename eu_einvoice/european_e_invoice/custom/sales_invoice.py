@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import mimetypes
 import os
 import re
@@ -1127,13 +1128,32 @@ def download_pdf(
 			frappe.local.response.filecontent = zugferd_pdf
 
 
-def _get_icc_profile_path() -> str:
+def _get_ghostscript_executable() -> str | None:
+	"""Return the resolved Ghostscript executable, from `ghostscript_path` in site_config or `gs` in PATH."""
+	import shutil
+
+	return shutil.which(frappe.conf.get("ghostscript_path") or "gs")
+
+
+@functools.cache
+def _get_ghostscript_version(gs_executable: str) -> tuple[int, ...] | None:
+	"""Return the version of the given Ghostscript executable, e.g. (10, 0, 0). Cached per executable."""
+	import subprocess
+
+	try:
+		output = subprocess.run([gs_executable, "--version"], capture_output=True, text=True, check=True)
+		return tuple(int(part) for part in output.stdout.strip().split("."))
+	except (OSError, subprocess.CalledProcessError, ValueError):
+		return None
+
+
+def _get_icc_profile_path(gs_executable: str) -> str:
 	"""Get the path to the ICC profile used by Ghostscript."""
 	import os
 	import re
 	import subprocess
 
-	gs_output = subprocess.run(["gs", "-h"], capture_output=True, text=True)
+	gs_output = subprocess.run([gs_executable, "-h"], capture_output=True, text=True)
 	# the output of `gs -h` contains the search paths for Ghostscript
 	# it looks like the following:
 	# ...
@@ -1161,49 +1181,104 @@ def _get_icc_profile_path() -> str:
 	return icc_path
 
 
+def _get_pdfa_args(gs_executable: str) -> list[str]:
+	"""Return the Ghostscript command line to convert a PDF from stdin to PDF/A-3 on stdout."""
+	args = [
+		gs_executable,
+		"-q",
+		"-sstdout=%stderr",
+		"-dPDFA=3",
+		"-dBATCH",
+		"-dNOPAUSE",
+		"-dPDFACompatibilityPolicy=2",
+		"-sColorConversionStrategy=RGB",
+		"--permit-file-read=srgb.icc",
+		"-sDEVICE=pdfwrite",
+		"-sOutputFile=-",
+	]
+
+	version = _get_ghostscript_version(gs_executable)
+	if version and (10, 0) <= version[:2] <= (10, 2):
+		# The new C-based PDF interpreter in 10.00-10.02 drops some text (e.g. bold colored "€").
+		# Use the legacy interpreter; the switch was removed together with it in 10.03.
+		args.append("-dNEWPDF=false")
+
+	# input files must come last, so that all options above apply to them
+	args.extend(["PDFA_def.ps", "-"])
+	return args
+
+
 def _convert_pdf_to_pdfa(pdf_data: bytes) -> bytes:
 	"""Convert the PDF data to PDF/A-3 using Ghostscript."""
 	import os
 	import subprocess
 
+	gs_executable = _get_ghostscript_executable()
+	if not gs_executable:
+		raise RuntimeError("Ghostscript executable not found.")
+
 	cwd = None
 	if not os.path.isfile("srgb.icc"):
 		# the PDFA_def.ps file requires the srgb.icc file to be present in the current directory
 		# if it is not present, change the current working directory to the icc profile path.
-		cwd = _get_icc_profile_path()
+		cwd = _get_icc_profile_path(gs_executable)
 
+	args = _get_pdfa_args(gs_executable)
 	with subprocess.Popen(
-		[
-			"gs",
-			"-q",
-			"-sstdout=%stderr",
-			"-dPDFA=3",
-			"-dBATCH",
-			"-dNOPAUSE",
-			"-dPDFACompatibilityPolicy=2",
-			"-sColorConversionStrategy=RGB",
-			"--permit-file-read=srgb.icc",
-			"-sDEVICE=pdfwrite",
-			"-sOutputFile=-",
-			"PDFA_def.ps",
-			"-",
-		],
+		args,
 		cwd=cwd,
 		stdin=subprocess.PIPE,
 		stdout=subprocess.PIPE,
 		stderr=subprocess.PIPE,
 	) as proc:
 		pdfa_data, err = proc.communicate(input=pdf_data)
-		if proc.returncode != 0:
-			raise RuntimeError(f"Ghostscript error: {err.decode()}")
-		return pdfa_data
+
+	if proc.returncode != 0 or not pdfa_data.startswith(b"%PDF"):
+		frappe.log_error(
+			"Ghostscript PDF/A-3 conversion failed",
+			f"Command: {' '.join(args)}\nReturn code: {proc.returncode}\n"
+			f"Output size: {len(pdfa_data)} bytes\n\n{err.decode(errors='replace')}",
+		)
+		raise RuntimeError(
+			f"Ghostscript PDF/A-3 conversion failed (return code {proc.returncode}): "
+			f"{err.decode(errors='replace').strip() or 'no valid PDF output'}"
+		)
+
+	return pdfa_data
 
 
 def _is_ghostscript_installed() -> bool:
 	"""Check if Ghostscript is installed on the system."""
-	import shutil
+	return _get_ghostscript_executable() is not None
 
-	return shutil.which("gs") is not None
+
+def convert_pdf_file_to_pdfa(input_path: str, output_path: str | None = None) -> str:
+	"""Debug helper: convert a PDF file to PDF/A-3 with Ghostscript, without attaching any XML.
+
+	Usage in `bench --site <site> console`:
+	    from eu_einvoice.european_e_invoice.custom.sales_invoice import convert_pdf_file_to_pdfa
+	    convert_pdf_file_to_pdfa("/path/to/invoice.pdf")
+
+	Returns the path of the written file (default: /tmp/<name>-pdfa.pdf).
+	"""
+	import os
+
+	if not output_path:
+		output_path = os.path.join("/tmp", os.path.splitext(os.path.basename(input_path))[0] + "-pdfa.pdf")
+
+	gs_executable = _get_ghostscript_executable()
+	if gs_executable:
+		print(f"Ghostscript: {gs_executable}, version {_get_ghostscript_version(gs_executable)}")
+		print("Command:", " ".join(_get_pdfa_args(gs_executable)))
+
+	with open(input_path, "rb") as f:
+		pdfa_data = _convert_pdf_to_pdfa(f.read())
+
+	with open(output_path, "wb") as f:
+		f.write(pdfa_data)
+
+	print(f"Written {len(pdfa_data)} bytes to {output_path}")
+	return output_path
 
 
 def attach_xml_to_pdf(invoice_id: str, pdf_data: bytes) -> bytes:
