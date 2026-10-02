@@ -43,6 +43,26 @@ duty_tax_fee_category_codes = CommonCodeRetriever(["urn:xoev-de:kosit:codeliste:
 vat_exemption_reason_codes = CommonCodeRetriever(["urn:xoev-de:kosit:codeliste:vatex_1"], "vatex-eu-ae")
 subject_codes = CommonCodeRetriever(["urn:xoev-de:kosit:codeliste:untdid.4451_4"], "AAI")
 
+# Mandatory mentions for French invoices (BR-FR-05), keyed by UNTDID 4451 subject code.
+# Values are (Company field, default text).
+FRENCH_MANDATORY_MENTIONS = {
+	"PMD": (  # Late payment penalties
+		"einvoice_mention_late_penalty",
+		"En cas de retard de paiement, des pénalités de retard sont exigibles le jour suivant la date de"
+		" règlement figurant sur la facture, au taux de trois fois le taux d'intérêt légal"
+		" (article L441-10 du Code de commerce).",
+	),
+	"PMT": (  # Fixed compensation for recovery costs
+		"einvoice_mention_recovery_costs",
+		"Une indemnité forfaitaire de 40 € pour frais de recouvrement est due en cas de retard de paiement"
+		" (articles L441-10 et D441-5 du Code de commerce).",
+	),
+	"AAB": (  # Early payment discount
+		"einvoice_mention_discount",
+		"Pas d'escompte pour paiement anticipé.",
+	),
+}
+
 
 @frappe.whitelist()
 def download_xrechnung(invoice_id: str):
@@ -299,6 +319,7 @@ class EInvoiceGenerator:
 			note.content.add(f"{self.invoice.incoterm} {self.invoice.named_place or ''}".strip())
 			self.doc.header.notes.add(note)
 
+		added_subject_codes = set()
 		if hasattr(self.invoice, "terms_and_conditions_items"):
 			for term in self.invoice.terms_and_conditions_items:
 				if not term.hide_from_print:
@@ -310,6 +331,20 @@ class EInvoiceGenerator:
 				note = IncludedNote(subject_code=subject_code)
 				note.content.add(to_markdown(terms).strip())
 				self.doc.header.notes.add(note)
+				added_subject_codes.add(subject_code)
+
+		if frappe.db.get_single_value("E Invoice Settings", "french_afnor_fr"):
+			self._add_french_mandatory_mentions(added_subject_codes)
+
+	def _add_french_mandatory_mentions(self, added_subject_codes: set[str]):
+		"""Add the notes required by BR-FR-05, unless already provided by the terms."""
+		for subject_code, (fieldname, default) in FRENCH_MANDATORY_MENTIONS.items():
+			if subject_code in added_subject_codes:
+				continue
+
+			note = IncludedNote(subject_code=subject_code)
+			note.content.add((self.company.get(fieldname) or default).strip())
+			self.doc.header.notes.add(note)
 
 	def _set_seller(self):
 		self.doc.trade.agreement.seller.name = self.invoice.company

@@ -87,6 +87,34 @@ def get_custom_fields():
 				"fieldtype": "Data",
 				"depends_on": "electronic_address_scheme",
 			},
+			{
+				"fieldname": "einvoice_french_mentions_section",
+				"label": _("French Mandatory Mentions"),
+				"insert_after": "electronic_address",
+				"fieldtype": "Section Break",
+				"collapsible": 1,
+				"description": _(
+					"Used when French AFNOR FE is enabled in E Invoice Settings. Leave empty to use the legal default text."
+				),
+			},
+			{
+				"fieldname": "einvoice_mention_late_penalty",
+				"label": _("Late Payment Penalties (PMD)"),
+				"insert_after": "einvoice_french_mentions_section",
+				"fieldtype": "Small Text",
+			},
+			{
+				"fieldname": "einvoice_mention_recovery_costs",
+				"label": _("Recovery Costs (PMT)"),
+				"insert_after": "einvoice_mention_late_penalty",
+				"fieldtype": "Small Text",
+			},
+			{
+				"fieldname": "einvoice_mention_discount",
+				"label": _("Early Payment Discount (AAB)"),
+				"insert_after": "einvoice_mention_recovery_costs",
+				"fieldtype": "Small Text",
+			},
 		],
 		"Supplier": [
 			{
